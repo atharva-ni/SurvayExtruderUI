@@ -1,0 +1,7 @@
+title,abstract,n_citation
+"A Survey of Machine Learning Techniques","This paper provides a comprehensive survey of machine learning techniques including supervised, unsupervised, and reinforcement learning methods.",150
+"Deep Learning for Computer Vision","We propose a novel deep learning architecture for computer vision tasks using convolutional neural networks.",75
+"Review of Natural Language Processing","This review paper examines the state-of-the-art in natural language processing and text analysis.",200
+"Neural Network Optimization","We present a new optimization algorithm for training neural networks with improved convergence properties.",45
+"Systematic Review of AI Ethics","A systematic review of ethical considerations in artificial intelligence research and applications.",120
+
