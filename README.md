@@ -1,159 +1,117 @@
 # SurvayExtruderU
 
-An advanced AI-powered system to identify and filter survey papers from academic datasets using hybrid classification combining keyword matching with DistilBERT deep learning model.
+Web interface for the survey-paper classifier from [SurvayExtruderModel](https://github.com/atharva-ni/SurvayExtruderModel).
+Upload a publication list (CSV) and the app shows which papers are surveys, and how the h-index, i10-index
+and citation count change without them.
 
-## Features
+## How it classifies
 
-- **Hybrid Classification**: Combines keyword-based detection with DistilBERT neural network
-- **Real-time Processing**: Fast API backend with React frontend
-- **Comprehensive Metrics**: H-index, i10-index, citation analysis
-- **Modern UI**: Built with React, TypeScript, and Tailwind CSS
-- **File Upload**: Drag-and-drop CSV file upload interface
+- **DistilBERT**, fine-tuned on 9,624 real papers (surveys from survey-only journals vs. research papers from
+  topic- and year-matched research journals), estimates how likely each paper is a survey from its title and abstract.
+- A **learned hybrid** combines that score with title keywords, survey/research phrasing in the abstract and the
+  reference count.
+- Each paper then gets one **category**:
+
+| Category | Meaning | Default |
+|---|---|---|
+| `survey` | Survey, tutorial or review | Excluded |
+| `non-paper` | Book, editorial, erratum (from publication type or title) | Excluded |
+| `magazine-overview` | Magazine article flagged by the model that does not call itself a survey | Kept (optional switch to exclude) |
+| `research` | Original research | Kept |
+
+Papers with only a title (no abstract, venue or type) count as surveys only if the title says so.
+Measured performance: 95% accuracy on 1,925 held-out papers; 96% of unseen papers on five authors'
+Google Scholar top-20 lists classified correctly. See the model repository's `reports/` for details.
 
 ## Prerequisites
 
-- Node.js (v16 or higher)
-- Python (v3.8 or higher)
-- pip (Python package manager)
+- Node.js 18 or later
+- Python 3.10 or later (tested with 3.14)
+- The trained model (see below)
 
-## Quick Start
+## Model setup
 
-### Option 1: Automated Setup (Recommended)
+The model is not stored in this repository (it is ~270 MB). Copy these files from the model repository's
+`distilbert_survey_model/` folder (created by `python main.py train` there) into `backend/distilbert_survey_model/`:
 
-**Windows:**
-```bash
-# Run the automated startup script
-start.bat
+```
+config.json   model.safetensors   tokenizer.json   tokenizer_config.json
+survey_config.json   hybrid_combiner.joblib
 ```
 
-**Linux/Mac:**
-```bash
-# Make the script executable and run
-chmod +x start.sh
-./start.sh
-```
+The backend refuses to start if any of them is missing. To use a model stored elsewhere, set
+`SURVEY_MODEL_PATH` to its folder.
 
-### Option 2: Manual Setup
+The classification code in `backend/pipeline/` is a copy of the model repository's `src/` modules
+(see `backend/pipeline/README.md` for the commit). After retraining or changing the rules there,
+copy both the model files and those modules again.
 
-1. **Install Frontend Dependencies:**
-```bash
-npm install
-```
+## Quick start
 
-2. **Install Backend Dependencies:**
+**Windows:** `start.bat`  **Linux/Mac:** `./start.sh`
+
+Or manually:
+
 ```bash
+# Backend (terminal 1)
 cd backend
 pip install -r requirements.txt
-cd ..
-```
+python main.py            # http://127.0.0.1:8000
 
-3. **Start the Application:**
-```bash
-# Terminal 1: Start backend server
-cd backend
-python main.py
-
-# Terminal 2: Start frontend
-npm run dev
-```
-
-## Usage
-
-1. **Access the Application**: Open http://localhost:5173 in your browser
-2. **Upload CSV File**: Upload a CSV file with columns: `title`, `abstract`, `n_citation`
-3. **Run Classification**: Click "Classify Survey Papers" to process your dataset
-4. **View Results**: See detailed metrics including papers excluded, citations removed, and index changes
-
-## API Endpoints
-
-- `GET /` - API health check
-- `GET /health` - Detailed health status
-- `POST /classify` - Process CSV file and return classification results
-
-## Project Structure
-
-```
-├── backend/                 # Python FastAPI backend
-│   ├── main.py             # Main API server
-│   └── requirements.txt    # Python dependencies
-├── src/                    # React frontend
-│   ├── components/         # UI components
-│   ├── pages/             # Application pages
-│   └── ...
-├── distilbert_survey_model/ # Pre-trained model files
-├── start.bat              # Windows startup script
-├── start.sh               # Linux/Mac startup script
-└── package.json           # Node.js dependencies
-```
-
-## Technologies Used
-
-**Frontend:**
-- React 18
-- TypeScript
-- Vite
-- Tailwind CSS
-- shadcn/ui components
-
-**Backend:**
-- FastAPI
-- Python 3.8+
-- PyTorch
-- Transformers (Hugging Face)
-- Pandas
-- scikit-learn
-
-**AI/ML:**
-- DistilBERT (DistilBERTForSequenceClassification)
-- Hybrid keyword + neural network classification
-- Survey paper detection algorithms
-
-## Model Requirements
-
-The application requires the `distilbert_survey_model` directory containing:
-- `config.json`
-- `model.safetensors`
-- `tokenizer.json`
-- `vocab.txt`
-- Other model files
-
-## CSV Format Requirements
-
-Your input CSV must contain these columns:
-- `title`: Paper title
-- `abstract`: Paper abstract
-- `n_citation`: Number of citations
-
-## Development
-
-**Frontend Development:**
-```bash
-npm run dev
-```
-
-**Backend Development:**
-```bash
-cd backend
-python main.py
-```
-
-**Install Dependencies:**
-```bash
-# Frontend
+# Frontend (terminal 2)
 npm install
+npm run dev               # http://localhost:8080
+```
 
-# Backend
-cd backend
-pip install -r requirements.txt
+Open http://localhost:8080 and choose **Classification**.
+
+For GPU inference, install the CUDA build of PyTorch before the requirements
+(see the comment at the top of `backend/requirements.txt`).
+
+## CSV format
+
+| Column | Required | Accepted names |
+|---|---|---|
+| Title | yes | `title` |
+| Citation count | yes | `n_citation`, `citations`, `citationCount`, `cited_by_count`, … |
+| Abstract | recommended | `abstract` |
+| Venue | recommended (needed for the magazine rule) | `venue`, `journal`, `source` |
+| Publication type | recommended (detects books and editorials) | `type`, `publicationTypes` |
+| References | optional | `ReferenceCount`, or `references` as a `;`-separated list |
+
+Files exported by the model repository (`python main.py extract …`) work as they are. Maximum upload: 50 MB.
+
+## API
+
+- `GET /health`: model status, device and thresholds
+- `POST /classify`: multipart form with
+  - `file`: the CSV
+  - `exclude_magazine_overviews`: `true` / `false` (default `false`)
+  - `mode`: `learned` (default), `or`, `model` or `keyword`
+
+  Returns counts per category, metrics before and after exclusion, and the kept and excluded papers,
+  each with `Category`, `SurveyScore` and `Prediction` (1 = kept, 0 = excluded).
+
+The backend listens on 127.0.0.1 only. Set `HOST=0.0.0.0` to make it reachable from other machines, and
+`VITE_API_URL` (frontend) if it runs on a different address than `http://localhost:8000`.
+
+## Project structure
+
+```
+├── backend/
+│   ├── main.py                    # FastAPI server
+│   ├── pipeline/                  # Classification code copied from the model repository
+│   ├── distilbert_survey_model/   # Trained model (not in git; see Model setup)
+│   └── requirements.txt
+├── src/                           # React frontend (Vite, TypeScript, Tailwind, shadcn/ui)
+├── sample_data.csv                # Small example input
+├── start.bat / start.sh
+└── package.json
 ```
 
 ## Troubleshooting
 
-1. **Backend not starting**: Ensure Python dependencies are installed
-2. **Model not found**: Check that `distilbert_survey_model` directory exists
-3. **CORS errors**: Backend runs on port 8000, frontend on port 5173
-4. **File upload issues**: Ensure CSV has required columns
-
-## License
-
-This project is part of SurvayExtruderU for academic research.
+1. **Backend exits at startup:** a model file is missing; see Model setup.
+2. **"Cannot reach the backend":** start it with `cd backend && python main.py`.
+3. **CORS errors:** the backend allows the frontend on ports 8080, 8081, 5173 and 3000.
+4. **"CSV must contain a title column…":** check the column names against the table above.

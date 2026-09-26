@@ -1,13 +1,16 @@
-const NotFound = () => {
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
+const NotFound = () => {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100">
+    <div className="flex min-h-screen items-center justify-center bg-background px-6">
       <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">404</h1>
-        <p className="mb-4 text-xl text-gray-600">Oops! Page not found</p>
-        <a href="/" className="text-blue-500 underline hover:text-blue-700">
-          Return to Home
-        </a>
+        <p className="text-sm font-medium text-muted-foreground">404</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Page not found</h1>
+        <p className="mt-2 text-sm text-muted-foreground">The requested page does not exist.</p>
+        <Button asChild variant="outline" className="mt-6">
+          <Link to="/">Return to home</Link>
+        </Button>
       </div>
     </div>
   );

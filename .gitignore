@@ -9,6 +9,12 @@ lerna-debug.log*
 
 backend/distilbert_survey_model/
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
 node_modules
 dist
 dist-ssr

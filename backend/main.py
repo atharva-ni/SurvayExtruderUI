@@ -1,259 +1,232 @@
-import os
-import time
-import pandas as pd
-import torch
-import numpy as np
-from typing import List, Tuple, Optional
-from tabulate import tabulate
-from torch.utils.data import Dataset, DataLoader
-from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
-from torch.amp import autocast
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import uvicorn
-import tempfile
+"""
+Survey Paper Classifier API
+===================
+Classifies uploaded publication lists into survey / magazine-overview /
+non-paper / research, and recalculates h-index, i10-index and citations
+without the excluded papers.
+
+The classification pipeline in ./pipeline is a copy of the model repository's
+code (see pipeline/README.md); the model is loaded once at startup.
+"""
+
+import io
 import json
+import os
+import sys
+import threading
+import time
+import traceback
+from contextlib import asynccontextmanager
+from typing import Optional
 
-# Initialize FastAPI app
-app = FastAPI(title="SurvayExtruderU API", version="1.0.0")
+import pandas as pd
+import uvicorn
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
-# Add CORS middleware
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(BACKEND_DIR, "pipeline"))
+
+from classifier import MODES, calculate_indices, categorize, classify_frame, prepare_frame  # noqa: E402
+from hybrid import LearnedHybrid  # noqa: E402
+from inference import load_config, load_model, predict_survey_proba  # noqa: E402
+from text_utils import paper_text  # noqa: E402
+
+MODEL_PATH = os.environ.get("SURVEY_MODEL_PATH", os.path.join(BACKEND_DIR, "distilbert_survey_model"))
+PIPELINE_COMMIT = "242f8a1"
+MAX_UPLOAD_MB = 50
+REQUIRED_MODEL_FILES = ("config.json", "model.safetensors", "tokenizer.json",
+                        "survey_config.json", "hybrid_combiner.joblib")
+
+# Accepted spellings of each input column (compared lower-cased and stripped)
+COLUMN_ALIASES = {
+    "title": {"title"},
+    "abstract": {"abstract"},
+    "citationCount": {"n_citation", "n_citations", "citations", "citation_count", "citation count", "citationcount",
+                      "num_citations", "num citations", "cited by", "citedby", "citation", "cited_by_count"},
+    "venue": {"venue", "journal", "source"},
+    "type": {"type", "publicationtypes", "publication_types", "publication type"},
+    "ReferenceCount": {"referencecount", "reference_count", "references_count", "referenced_works_count"},
+    "references": {"references"},
+}
+
+STATE: dict = {}
+INFERENCE_LOCK = threading.Lock()
+
+
+def load_pipeline() -> None:
+    missing = [f for f in REQUIRED_MODEL_FILES if not os.path.exists(os.path.join(MODEL_PATH, f))]
+    if missing:
+        raise RuntimeError(f"Model folder '{MODEL_PATH}' is missing {missing}. "
+                           "Copy the trained model from the model repository (see README).")
+    tokenizer, model = load_model(MODEL_PATH)
+    combiner = LearnedHybrid.load(MODEL_PATH)
+    config = load_config(MODEL_PATH)
+    STATE.update(tokenizer=tokenizer, model=model, combiner=combiner, config=config,
+                 device=str(next(model.parameters()).device))
+    print(f"Model loaded from '{MODEL_PATH}' on {STATE['device']}")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    load_pipeline()  # fail fast: no silent keyword-only fallback
+    yield
+
+
+app = FastAPI(title="Survey Paper Classifier API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:8080", "http://localhost:8081"],  # React dev server
+    allow_origins=[f"http://{host}:{port}" for host in ("localhost", "127.0.0.1")
+                   for port in (8080, 8081, 5173, 3000)],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------- Survey Keyword Logic ---------------- #
-survey_keywords = [
-    "survey", "review", "overview", "comparative",
-    "taxonomy", "state of the art", "systematic"
-]
 
-def keyword_is_survey(text: str) -> bool:
-    text = text.lower()
-    return any(keyword in text for keyword in survey_keywords)
+# ---------------- Input handling ---------------- #
+def read_csv(content: bytes) -> pd.DataFrame:
+    for encoding in ("utf-8-sig", "latin-1"):
+        try:
+            return pd.read_csv(io.BytesIO(content), encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+        except pd.errors.EmptyDataError:
+            raise HTTPException(status_code=400, detail="The CSV file is empty.")
+    raise HTTPException(status_code=400, detail="Could not decode the CSV file (use UTF-8).")
 
-# ---------------- Dataset Wrapper ---------------- #
-class SurveyDataset(Dataset):
-    def __init__(self, texts: List[str], tokenizer: DistilBertTokenizerFast, max_length: int = 512):
-        self.encodings = tokenizer(texts, truncation=True, padding=True, max_length=max_length)
 
-    def __len__(self) -> int:
-        return len(self.encodings['input_ids'])
+def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    lookup = {col.strip().lower(): col for col in df.columns}
+    renames = {}
+    for target, aliases in COLUMN_ALIASES.items():
+        source = next((lookup[a] for a in aliases if a in lookup), None)
+        if source is not None:
+            renames[source] = target
 
-    def __getitem__(self, idx: int) -> dict:
-        return {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
+    missing = [c for c in ("title", "citationCount") if c not in renames.values()]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"CSV must contain a title column and a citation count column "
+                    f"(e.g. 'n_citation', 'citations' or 'citationCount'). Found: {list(df.columns)}"))
 
-# ---------------- Hybrid Classifier Function ---------------- #
-def classify_with_hybrid_model(
-    df: pd.DataFrame,
-    model_path: str = './distilbert_survey_model',
-    batch_size: int = 8,
-    threshold: float = 0.8
-) -> List[int]:
+    df = df.rename(columns=renames)
+    if "abstract" not in df.columns:
+        df["abstract"] = ""
+    df["title"] = df["title"].fillna("").astype(str)
+    df["abstract"] = df["abstract"].fillna("").astype(str)
+    df["citationCount"] = pd.to_numeric(df["citationCount"], errors="coerce").fillna(0).astype(int)
+    return df[df["title"].str.strip() != ""].reset_index(drop=True)
 
-    tokenizer = DistilBertTokenizerFast.from_pretrained(model_path)
-    
-    # Load model with proper configuration to handle BFloat16 issues
-    try:
-        # Force model to use float32 and handle architecture mismatch
-        model = DistilBertForSequenceClassification.from_pretrained(
-            model_path, 
-            ignore_mismatched_sizes=True,
-            torch_dtype=torch.float32,
-            force_download=False,
-            local_files_only=True
-        )
-        
-        # Convert model to float32 explicitly
-        model = model.float()
-        # Model loaded successfully with float32 precision
-        
-    except Exception as e:
-        # Model loading error, falling back to keyword-only classification
-        texts = (df['title'].astype(str) + " " + df['abstract'].astype(str)).str.lower().tolist()
-        return [0 if keyword_is_survey(t) else 1 for t in texts]
-    
-    model.eval()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
-    texts = (df['title'].astype(str) + " " + df['abstract'].astype(str)).str.lower().tolist()
-    dataset = SurveyDataset(texts, tokenizer)
-    dataloader = DataLoader(dataset, batch_size=batch_size)
+def records(df: pd.DataFrame) -> list:
+    """JSON-safe records (NaN -> null, numpy types -> Python)."""
+    return json.loads(df.to_json(orient="records"))
 
-    all_probs = []
 
-    with torch.no_grad():
-        for batch in dataloader:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-
-            try:
-                # Run inference without autocast to avoid BFloat16 issues
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                logits = outputs.logits
-                probs = torch.nn.functional.softmax(logits, dim=-1)
-                survey_probs = probs[:, 0].cpu().numpy()  # class 0 = survey
-                all_probs.extend(survey_probs)
-                
-            except Exception as e:
-                # Inference error occurred
-                # Fallback to keyword classification for this batch
-                batch_texts = texts[len(all_probs):len(all_probs)+len(input_ids)]
-                batch_keyword_preds = [0 if keyword_is_survey(t) else 1 for t in batch_texts]
-                all_probs.extend([0.8 if pred == 0 else 0.2 for pred in batch_keyword_preds])
-
-    model_preds = [0 if prob > threshold else 1 for prob in all_probs]
-    keyword_preds = [0 if keyword_is_survey(t) else None for t in texts]
-
-    final_preds = [
-        kp if kp is not None else mp
-        for kp, mp in zip(keyword_preds, model_preds)
-    ]
-    return final_preds
-
-# ---------------- Index Calculation ---------------- #
-def calculate_indices(df: pd.DataFrame) -> Tuple[int, int]:
-    citations = df['n_citation'].fillna(0).astype(int).sort_values(ascending=False).values
-    h_index = int(sum(c >= (i + 1) for i, c in enumerate(citations)))
-    i10_index = int(sum(c >= 10 for c in citations))
-    return h_index, i10_index
-
-# ---------------- API Endpoints ---------------- #
+# ---------------- Endpoints ---------------- #
 @app.get("/")
-async def root():
+def root():
     return {"message": "Survey Paper Classification API is running"}
 
+
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy", "model_available": os.path.exists("./distilbert_survey_model")}
+def health():
+    return {
+        "status": "healthy" if STATE else "model not loaded",
+        "modelLoaded": bool(STATE),
+        "modelPath": MODEL_PATH,
+        "device": STATE.get("device"),
+        "distilbertThreshold": STATE.get("config", {}).get("threshold"),
+        "hybridThreshold": getattr(STATE.get("combiner"), "threshold", None),
+        "pipelineCommit": PIPELINE_COMMIT,
+    }
+
 
 @app.post("/classify")
-async def classify_papers(file: UploadFile = File(...)):
-    if not file.filename.endswith('.csv'):
+def classify(
+    file: UploadFile = File(...),
+    mode: str = Form("learned"),
+    exclude_magazine_overviews: bool = Form(False),
+):
+    if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a CSV")
-    
-    # Save uploaded file temporarily
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
-        tmp_file_path = tmp_file.name
-    
+    if mode not in MODES:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {list(MODES)}")
+
+    content = file.file.read(MAX_UPLOAD_MB * 1024 * 1024 + 1)
+    if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File is larger than {MAX_UPLOAD_MB} MB")
+
+    df = standardize_columns(read_csv(content))
+    if df.empty:
+        raise HTTPException(status_code=400, detail="The CSV file has no papers with a title.")
+
     try:
-        # Load and validate CSV
-        df = pd.read_csv(tmp_file_path)
-        # Loaded CSV successfully
-
-        required_cols = {'title', 'abstract', 'n_citation'}
-        if not required_cols.issubset(df.columns):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"CSV must contain the columns: {required_cols}"
-            )
-
-        # Clean empty entries
-        df = df.dropna(subset=['title', 'abstract', 'n_citation'])
-        df = df[~df[['title', 'abstract']].apply(lambda x: x.str.strip().eq('').any(), axis=1)]
-        # Cleaned dataset successfully
-
-        # Check if model exists
-        model_path = './distilbert_survey_model'
-        if not os.path.exists(model_path):
-            raise HTTPException(
-                status_code=500, 
-                detail="Model not found. Please ensure the model is available."
-            )
-
-        # Run classification
-        start_time = time.time()
-        df['Prediction'] = classify_with_hybrid_model(df, model_path)
-        processing_time = time.time() - start_time
-
-        # Separate survey and non-survey papers
-        survey_df = df[df['Prediction'] == 0]
-        non_survey_df = df[df['Prediction'] == 1].drop(columns=['Prediction'])
-
-        # Calculate metrics
-        total_papers = len(df)
-        excluded_papers = len(survey_df)
-        excluded_citations = int(survey_df['n_citation'].fillna(0).astype(int).sum())
-        total_citations = int(df['n_citation'].fillna(0).astype(int).sum())
-
-        percent_papers_excluded = (excluded_papers / total_papers) * 100 if total_papers else 0
-        percent_citations_excluded = (excluded_citations / total_citations) * 100 if total_citations else 0
-
-        total_h_index, total_i10 = calculate_indices(df)
-        non_survey_h_index, non_survey_i10 = calculate_indices(non_survey_df)
-
-        # Clean data for JSON serialization
-        def clean_dataframe_for_json(df):
-            """Clean DataFrame to ensure JSON serialization compatibility"""
-            df_clean = df.copy()
-            
-            # Replace NaN, Infinity, and -Infinity with None or 0
-            df_clean = df_clean.replace([float('inf'), float('-inf')], None)
-            df_clean = df_clean.fillna('')
-            
-            # Convert to dict and clean each record
-            records = df_clean.to_dict('records')
-            for record in records:
-                for key, value in record.items():
-                    if isinstance(value, float):
-                        if pd.isna(value) or value in [float('inf'), float('-inf')]:
-                            record[key] = 0
-                        else:
-                            record[key] = float(value)
-                    elif isinstance(value, (int, np.integer)):
-                        record[key] = int(value)
-                    elif pd.isna(value):
-                        record[key] = ''
-            
-            return records
-
-        # Prepare results with proper type conversion and validation
-        results = {
-            "fileName": file.filename,
-            "fileSize": f"{(len(content) / 1024):.2f}",
-            "processingTime": f"{processing_time:.2f}s",
-            "totalPapers": int(total_papers),
-            "surveyPapers": int(excluded_papers),
-            "nonSurveyPapers": int(len(non_survey_df)),
-            "totalCitations": int(total_citations),
-            "excludedCitations": int(excluded_citations),
-            "remainingCitations": int(total_citations - excluded_citations),
-            "hIndexBefore": int(total_h_index),
-            "hIndexAfter": int(non_survey_h_index),
-            "i10Before": int(total_i10),
-            "i10After": int(non_survey_i10),
-            "percentPapersExcluded": f"{percent_papers_excluded:.2f}",
-            "percentCitationsExcluded": f"{percent_citations_excluded:.2f}",
-            "comparison": [
-                ["Total Papers", int(total_papers), int(len(non_survey_df))],
-                ["Total Citations", int(total_citations), int(total_citations - excluded_citations)],
-                ["H-Index", int(total_h_index), int(non_survey_h_index)],
-                ["i10-Index", int(total_i10), int(non_survey_i10)],
-            ],
-            "allSurveyData": clean_dataframe_for_json(survey_df),
-            "allNonSurveyData": clean_dataframe_for_json(non_survey_df)
-        }
-
-        return JSONResponse(content=results)
-
-    except Exception as e:
-        # Error processing file
-        import traceback
+        start = time.time()
+        frame = prepare_frame(df)
+        survey_proba: Optional[object] = None
+        if mode != "keyword":
+            texts = [paper_text(t, a) for t, a in zip(frame["Title"], frame["Abstract"])]
+            with INFERENCE_LOCK:
+                survey_proba = predict_survey_proba(texts, STATE["tokenizer"], STATE["model"],
+                                                    max_length=STATE["config"].get("max_length", 384))
+        is_survey, score = classify_frame(frame, model_path=MODEL_PATH, mode=mode, survey_proba=survey_proba)
+        df["Category"] = categorize(frame, is_survey)
+        df["SurveyScore"] = [round(float(s), 4) for s in score]
+        processing_time = time.time() - start
+    except Exception as e:  # report failures instead of silently falling back
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
-    
-    finally:
-        # Clean up temporary file
-        if os.path.exists(tmp_file_path):
-            os.unlink(tmp_file_path)
+        raise HTTPException(status_code=500, detail=f"Classification failed: {e}")
+
+    excluded_categories = {"survey", "non-paper"} | ({"magazine-overview"} if exclude_magazine_overviews else set())
+    excluded = df["Category"].isin(excluded_categories)
+    df["Prediction"] = (~excluded).astype(int)  # 1 = kept, 0 = excluded
+    kept_df, excluded_df = df[~excluded], df[excluded]
+
+    counts = df["Category"].value_counts()
+    total_papers, total_citations = len(df), int(df["citationCount"].sum())
+    excluded_citations = int(excluded_df["citationCount"].sum())
+    h_before, i10_before = calculate_indices(df)
+    h_after, i10_after = calculate_indices(kept_df)
+
+    return {
+        "fileName": file.filename,
+        "fileSize": f"{len(content) / 1024:.2f}",
+        "processingTime": f"{processing_time:.2f}s",
+        "mode": mode,
+        "excludeMagazineOverviews": exclude_magazine_overviews,
+        "categories": {
+            "survey": int(counts.get("survey", 0)),
+            "magazineOverview": int(counts.get("magazine-overview", 0)),
+            "nonPaper": int(counts.get("non-paper", 0)),
+            "research": int(counts.get("research", 0)),
+        },
+        "totalPapers": total_papers,
+        "surveyPapers": int(counts.get("survey", 0)),
+        "excludedPapers": int(excluded.sum()),
+        "nonSurveyPapers": len(kept_df),
+        "totalCitations": total_citations,
+        "excludedCitations": excluded_citations,
+        "remainingCitations": total_citations - excluded_citations,
+        "hIndexBefore": h_before,
+        "hIndexAfter": h_after,
+        "i10Before": i10_before,
+        "i10After": i10_after,
+        "percentPapersExcluded": f"{100 * excluded.sum() / total_papers:.2f}",
+        "percentCitationsExcluded": f"{100 * excluded_citations / total_citations:.2f}" if total_citations else "0.00",
+        "comparison": [
+            ["Total Papers", total_papers, len(kept_df)],
+            ["Total Citations", total_citations, total_citations - excluded_citations],
+            ["H-Index", h_before, h_after],
+            ["i10-Index", i10_before, i10_after],
+        ],
+        "allSurveyData": records(excluded_df),
+        "allNonSurveyData": records(kept_df),
+    }
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # 127.0.0.1: only reachable from this computer; set HOST=0.0.0.0 to expose it on the network
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", 8000)))

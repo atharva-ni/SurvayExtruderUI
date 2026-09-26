@@ -1,164 +1,148 @@
 import { Navigation } from "@/components/Navigation";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Brain, Target, Zap, Shield, BarChart3, FileText } from "lucide-react";
+
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <Card className="p-6 md:p-8">
+    <h2 className="text-lg font-semibold tracking-tight text-foreground">{title}</h2>
+    <div className="mt-4">{children}</div>
+  </Card>
+);
+
+const Subsection = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div>
+    <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+    <div className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{children}</div>
+  </div>
+);
+
+const Code = ({ children }: { children: React.ReactNode }) => (
+  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{children}</code>
+);
 
 const About = () => {
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-background">
       <Navigation />
-      
-      <div className="container mx-auto px-6 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-semibold text-gray-900 mb-3">
-            About SurvayExtruderU
-          </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Professional machine learning system for identifying and filtering survey papers 
-            from academic research datasets with high accuracy and reliability.
+
+      <div className="container mx-auto max-w-4xl px-6 py-10">
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Methodology</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            How papers are classified, how the classifier was validated, and what the outputs contain.
           </p>
         </div>
 
-        <div className="grid gap-8 max-w-6xl mx-auto">
-          {/* Methodology Section */}
-          <Card className="p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <Brain className="w-8 h-8 text-primary" />
-              <h2 className="text-2xl font-bold text-foreground">Hybrid Classification Methodology</h2>
-            </div>
-            
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-foreground">Keyword-Based Detection</h3>
-                <p className="text-muted-foreground">
-                  Our system first applies rule-based filtering using carefully curated survey keywords:
+        <div className="grid gap-6">
+          <Section title="Classification model">
+            <div className="grid gap-6 md:grid-cols-2">
+              <Subsection title="DistilBERT">
+                A DistilBERT model fine-tuned on 9,624 papers (surveys from survey-only journals; research papers from
+                topic- and year-matched research journals) reads each title and abstract and estimates the probability
+                that the paper is a survey.
+              </Subsection>
+              <Subsection title="Learned combiner">
+                <p>
+                  A small learned combiner weighs the DistilBERT score against interpretable cues: survey terms in the
+                  title, survey or research phrasing in the abstract, and the reference count.
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {["survey", "review", "overview", "comparative", "taxonomy", "state of the art", "systematic"].map((keyword) => (
-                    <Badge key={keyword} variant="secondary">{keyword}</Badge>
-                  ))}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {["survey", "review", "overview", "tutorial", "taxonomy", "state of the art", "comparative study"].map(
+                    (keyword) => (
+                      <Badge key={keyword} variant="secondary" className="font-normal">
+                        {keyword}
+                      </Badge>
+                    )
+                  )}
                 </div>
-              </div>
-              
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-foreground">DistilBERT Deep Learning</h3>
-                <p className="text-muted-foreground">
-                  For papers not caught by keywords, we deploy a fine-tuned DistilBERT model that analyzes 
-                  the semantic content of titles and abstracts to identify survey characteristics with high precision.
-                </p>
-              </div>
+              </Subsection>
             </div>
-          </Card>
 
-          {/* Features Section */}
-          <div className="grid md:grid-cols-3 gap-6">
-            <Card className="p-6 text-center">
-              <Target className="w-12 h-12 text-primary mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-foreground mb-2">High Accuracy</h3>
-              <p className="text-muted-foreground">
-                Hybrid approach achieves superior accuracy compared to single-method classification
-              </p>
-            </Card>
-
-            <Card className="p-6 text-center">
-              <Zap className="w-12 h-12 text-success mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-foreground mb-2">Fast Processing</h3>
-              <p className="text-muted-foreground">
-                Optimized GPU acceleration for rapid batch processing of large academic datasets
-              </p>
-            </Card>
-
-            <Card className="p-6 text-center">
-              <Shield className="w-12 h-12 text-warning mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-foreground mb-2">Robust Pipeline</h3>
-              <p className="text-muted-foreground">
-                Handles missing data gracefully and provides detailed validation reports
-              </p>
-            </Card>
-          </div>
-
-          {/* Technical Details */}
-          <Card className="p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <BarChart3 className="w-8 h-8 text-primary" />
-              <h2 className="text-2xl font-bold text-foreground">Output Metrics & Analysis</h2>
+            <div className="mt-6 grid gap-6 border-t pt-6 md:grid-cols-3">
+              <Subsection title="Magazine overviews">
+                Magazine articles flagged by the model that do not describe themselves as surveys are reported as
+                magazine overviews and retained unless you choose to exclude them.
+              </Subsection>
+              <Subsection title="Title-only records">
+                Records with only a title (no abstract, venue or type) count as surveys only if the title says so,
+                which prevents books from being classified as surveys.
+              </Subsection>
+              <Subsection title="Non-papers">
+                Books, editorials and errata are identified from their publication type or title. They are excluded
+                but not counted as surveys.
+              </Subsection>
             </div>
-            
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <h3 className="text-lg font-semibold text-foreground mb-3">Generated Reports</h3>
-                <ul className="space-y-2 text-muted-foreground">
-                  <li className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-success" />
-                    <strong>Non-Survey-Papers.csv</strong> - Cleaned dataset for analysis
+          </Section>
+
+          <Section title="Validation">
+            <div className="grid gap-6 md:grid-cols-3">
+              <Subsection title="Held-out test set">95% accuracy on 1,925 held-out papers.</Subsection>
+              <Subsection title="Author profiles">
+                96% of unseen papers on five authors' Google Scholar top-20 lists classified correctly.
+              </Subsection>
+              <Subsection title="Error handling">
+                Missing abstracts are handled explicitly, and invalid input is reported as an error rather than
+                guessed.
+              </Subsection>
+            </div>
+          </Section>
+
+          <Section title="Outputs">
+            <div className="grid gap-6 md:grid-cols-2">
+              <Subsection title="Files">
+                <ul className="space-y-1.5">
+                  <li>
+                    <Code>non-survey-papers.csv</Code>: original research papers used for the adjusted metrics
                   </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-warning" />
-                    <strong>Survey-Papers.csv</strong> - Identified survey papers
+                  <li>
+                    <Code>excluded-papers.csv</Code>: survey/review papers and non-papers, with category and survey
+                    score
                   </li>
                 </ul>
-              </div>
-              
-              <div>
-                <h3 className="text-lg font-semibold text-foreground mb-3">Impact Metrics</h3>
-                <ul className="space-y-2 text-muted-foreground">
-                  <li>• <strong>H-Index</strong> calculation before/after filtering</li>
-                  <li>• <strong>i10-Index</strong> analysis for research impact</li>
-                  <li>• <strong>Citation analysis</strong> with exclusion statistics</li>
-                  <li>• <strong>Percentage breakdown</strong> of papers and citations</li>
+              </Subsection>
+              <Subsection title="Metrics">
+                <ul className="list-disc space-y-1.5 pl-4">
+                  <li>h-index with and without excluded papers</li>
+                  <li>i10-index with and without excluded papers</li>
+                  <li>Total citations and citations attributable to excluded papers</li>
+                  <li>Share of papers and citations excluded</li>
                 </ul>
-              </div>
+              </Subsection>
             </div>
-          </Card>
+          </Section>
 
-          {/* Data Requirements */}
-          <Card className="p-8 bg-accent/5 border-accent/20">
-            <h2 className="text-2xl font-bold text-foreground mb-4">Data Requirements</h2>
-            <div className="grid md:grid-cols-3 gap-6">
-              <div>
-                <h3 className="font-semibold text-foreground mb-2">Required Columns</h3>
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  <li><code className="bg-muted px-2 py-1 rounded">title</code> - Paper title</li>
-                  <li><code className="bg-muted px-2 py-1 rounded">abstract</code> - Paper abstract</li>
-                  <li><code className="bg-muted px-2 py-1 rounded">n_citation</code> - Citation count</li>
+          <Section title="Input requirements">
+            <div className="grid gap-6 md:grid-cols-3">
+              <Subsection title="Columns">
+                <ul className="space-y-1.5">
+                  <li>
+                    <Code>title</Code> (required)
+                  </li>
+                  <li>
+                    <Code>n_citation</Code> (required; <Code>citations</Code> or <Code>citationCount</Code> also
+                    accepted)
+                  </li>
+                  <li>
+                    <Code>abstract</Code>, <Code>venue</Code>, <Code>type</Code> (recommended)
+                  </li>
                 </ul>
-              </div>
-              
-              <div>
-                <h3 className="font-semibold text-foreground mb-2">File Format</h3>
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  <li>• CSV format with UTF-8 encoding</li>
-                  <li>• Maximum file size: 100MB</li>
-                  <li>• Headers in first row</li>
+              </Subsection>
+              <Subsection title="File format">
+                <ul className="list-disc space-y-1.5 pl-4">
+                  <li>CSV, UTF-8 encoded</li>
+                  <li>Header row first</li>
+                  <li>Maximum 50 MB</li>
                 </ul>
-              </div>
-              
-              <div>
-                <h3 className="font-semibold text-foreground mb-2">Data Quality</h3>
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  <li>• Empty rows automatically removed</li>
-                  <li>• Missing citations handled as zero</li>
-                  <li>• Text preprocessing included</li>
+              </Subsection>
+              <Subsection title="Preprocessing">
+                <ul className="list-disc space-y-1.5 pl-4">
+                  <li>Rows without a title are skipped</li>
+                  <li>Missing citation counts are treated as zero</li>
+                  <li>LaTeX and HTML markup is removed</li>
                 </ul>
-              </div>
+              </Subsection>
             </div>
-          </Card>
-
-          {/* Team Section */}
-          <Card className="p-8 text-center">
-            <h2 className="text-2xl font-bold text-foreground mb-4">Research & Development</h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto mb-6">
-              This system was developed to address the critical need for automated survey paper identification 
-              in academic research workflows. Our hybrid approach combines the interpretability of rule-based 
-              methods with the power of transformer-based deep learning.
-            </p>
-            
-            <div className="flex justify-center gap-4 mt-6">
-              <Badge variant="outline" className="px-4 py-2">Machine Learning</Badge>
-              <Badge variant="outline" className="px-4 py-2">Natural Language Processing</Badge>
-              <Badge variant="outline" className="px-4 py-2">Academic Research</Badge>
-            </div>
-          </Card>
+          </Section>
         </div>
       </div>
     </main>
