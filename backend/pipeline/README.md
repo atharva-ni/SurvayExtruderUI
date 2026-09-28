@@ -1,7 +1,7 @@
 # Classification pipeline (vendored)
 
 These modules are copies from the model repository
-[atharva-ni/SurveyExcluderModel](https://github.com/atharva-ni/SurveyExcluderModel), `src/`, commit `970c779`
+[atharva-ni/SurvayExtruderModel](https://github.com/atharva-ni/SurvayExtruderModel), `src/`, commit `9629e4d`
 (only change: console messages without emoji, for the Windows console):
 
 | File | Purpose |
