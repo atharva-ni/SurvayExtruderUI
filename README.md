@@ -1,6 +1,6 @@
-# Survey Excluder UI
+# SurvayExtruderU
 
-Web interface for the survey-paper classifier from [SurveyExcluderModel](https://github.com/atharva-ni/SurveyExcluderModel).
+Web interface for the survey-paper classifier from [SurvayExtruderModel](https://github.com/atharva-ni/SurvayExtruderModel).
 Upload a publication list (CSV) and the app shows which papers are surveys, and how the h-index, i10-index
 and citation count change without them.
 
@@ -15,22 +15,13 @@ and citation count change without them.
 | Category | Meaning | Default |
 |---|---|---|
 | `survey` | Survey, tutorial or review | Excluded |
-| `non-paper` | Book, editorial, erratum (from publication type or title) | Kept in the metrics, never counted as a survey |
+| `non-paper` | Book, editorial, erratum (from publication type or title) | Excluded |
 | `magazine-overview` | Magazine article flagged by the model that does not call itself a survey | Kept (optional switch to exclude) |
 | `research` | Original research | Kept |
 
 Papers with only a title (no abstract, venue or type) count as surveys only if the title says so.
-
-Measured performance (details in the model repository's `reports/`):
-
-- 95% accuracy on 1,925 held-out journal papers;
-- 92% F1 on 970 arXiv papers from 45 journals not used in training;
-- on papers with abstracts from real author profiles (labeled by hand): 72% precision and 63% recall;
-- 96% of unseen papers on five authors' Google Scholar top-20 lists classified correctly.
-
-The results are an additional view of a publication record, useful for aggregate or cohort-level
-analysis. At this accuracy they should not be used to judge an individual researcher: check the
-most-cited excluded papers the app lists.
+Measured performance: 95% accuracy on 1,925 held-out papers; 96% of unseen papers on five authors'
+Google Scholar top-20 lists classified correctly. See the model repository's `reports/` for details.
 
 ## Prerequisites
 
@@ -99,7 +90,7 @@ Files exported by the model repository (`python main.py extract …`) work as th
   - `mode`: `learned` (default), `or`, `model` or `keyword`
 
   Returns counts per category, metrics before and after exclusion, and the kept and excluded papers,
-  each with `Category`, `SurveyScore` and `Prediction` (0 = survey, excluded; 1 = kept).
+  each with `Category`, `SurveyScore` and `Prediction` (1 = kept, 0 = excluded).
 
 The backend listens on 127.0.0.1 only. Set `HOST=0.0.0.0` to make it reachable from other machines, and
 `VITE_API_URL` (frontend) if it runs on a different address than `http://localhost:8000`.
