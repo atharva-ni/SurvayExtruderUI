@@ -33,7 +33,7 @@ from inference import load_config, load_model, predict_survey_proba  # noqa: E40
 from text_utils import paper_text  # noqa: E402
 
 MODEL_PATH = os.environ.get("SURVEY_MODEL_PATH", os.path.join(BACKEND_DIR, "distilbert_survey_model"))
-PIPELINE_COMMIT = "85cc5bb"
+PIPELINE_COMMIT = "9629e4d"
 MAX_UPLOAD_MB = 50
 REQUIRED_MODEL_FILES = ("config.json", "model.safetensors", "tokenizer.json",
                         "survey_config.json", "hybrid_combiner.joblib")
