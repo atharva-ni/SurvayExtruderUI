@@ -68,15 +68,18 @@ const About = () => {
                 which prevents books from being classified as surveys.
               </Subsection>
               <Subsection title="Non-papers">
-                Books, editorials and errata are identified from their publication type or title. They are excluded
-                but not counted as surveys.
+                Books, editorials and errata are identified from their publication type or title. They are never
+                counted as surveys and stay in both the original and adjusted metrics.
               </Subsection>
             </div>
           </Section>
 
           <Section title="Validation">
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid gap-6 md:grid-cols-2">
               <Subsection title="Held-out test set">95% accuracy on 1,925 held-out papers.</Subsection>
+              <Subsection title="Unseen venues">
+                92% F1 on 970 arXiv papers from 45 journals that were not used in training.
+              </Subsection>
               <Subsection title="Author profiles">
                 96% of unseen papers on five authors' Google Scholar top-20 lists classified correctly.
               </Subsection>
@@ -92,11 +95,11 @@ const About = () => {
               <Subsection title="Files">
                 <ul className="space-y-1.5">
                   <li>
-                    <Code>non-survey-papers.csv</Code>: original research papers used for the adjusted metrics
+                    <Code>non-survey-papers.csv</Code>: all papers used for the adjusted metrics (research,
+                    non-papers and, unless excluded, magazine overviews)
                   </li>
                   <li>
-                    <Code>excluded-papers.csv</Code>: survey/review papers and non-papers, with category and survey
-                    score
+                    <Code>excluded-papers.csv</Code>: survey/review papers, with category and survey score
                   </li>
                 </ul>
               </Subsection>

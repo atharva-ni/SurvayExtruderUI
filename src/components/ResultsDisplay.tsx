@@ -128,7 +128,7 @@ export const ResultsDisplay = ({ results, isRunning }: ResultsDisplayProps) => {
                 <tbody className="divide-y">
                   {[
                     { key: "survey", count: results.categories.survey, includes: "Surveys, reviews, tutorials", excluded: true },
-                    { key: "non-paper", count: results.categories.nonPaper, includes: "Books, editorials, errata", excluded: true },
+                    { key: "non-paper", count: results.categories.nonPaper, includes: "Books, editorials, errata", excluded: false },
                     {
                       key: "magazine-overview",
                       count: results.categories.magazineOverview,
@@ -189,7 +189,7 @@ export const ResultsDisplay = ({ results, isRunning }: ResultsDisplayProps) => {
               <SectionTitle>Most-cited excluded papers</SectionTitle>
               <p className="-mt-2 mb-3 text-sm text-muted-foreground">
                 These papers account for most of the change in the metrics above. Verify that each one is a
-                survey/review or non-paper.
+                survey or review.
               </p>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-sm">
@@ -230,8 +230,8 @@ export const ResultsDisplay = ({ results, isRunning }: ResultsDisplayProps) => {
                 <div>
                   <p className="text-sm font-medium text-foreground">Non-survey papers</p>
                   <p className="text-xs text-muted-foreground">
-                    {results.nonSurveyPapers.toLocaleString()} papers, original research
-                    {results.excludeMagazineOverviews ? "" : " and magazine overviews"}
+                    {results.nonSurveyPapers.toLocaleString()} papers: original research
+                    {results.excludeMagazineOverviews ? "" : ", magazine overviews"} and non-papers
                   </p>
                 </div>
                 <Button size="sm" onClick={() => downloadFile(results.allNonSurveyData || [], "non-survey-papers.csv")}>
@@ -243,8 +243,8 @@ export const ResultsDisplay = ({ results, isRunning }: ResultsDisplayProps) => {
                 <div>
                   <p className="text-sm font-medium text-foreground">Excluded papers</p>
                   <p className="text-xs text-muted-foreground">
-                    {results.excludedPapers.toLocaleString()} papers, survey/review and non-papers
-                    {results.excludeMagazineOverviews ? " and magazine overviews" : ""}
+                    {results.excludedPapers.toLocaleString()} papers: surveys and reviews
+                    {results.excludeMagazineOverviews ? ", magazine overviews" : ""}
                   </p>
                 </div>
                 <Button

@@ -3,7 +3,7 @@ Survey Paper Classifier API
 ===================
 Classifies uploaded publication lists into survey / magazine-overview /
 non-paper / research, and recalculates h-index, i10-index and citations
-without the excluded papers.
+without the excluded surveys (non-papers count in both).
 
 The classification pipeline in ./pipeline is a copy of the model repository's
 code (see pipeline/README.md); the model is loaded once at startup.
@@ -33,7 +33,7 @@ from inference import load_config, load_model, predict_survey_proba  # noqa: E40
 from text_utils import paper_text  # noqa: E402
 
 MODEL_PATH = os.environ.get("SURVEY_MODEL_PATH", os.path.join(BACKEND_DIR, "distilbert_survey_model"))
-PIPELINE_COMMIT = "242f8a1"
+PIPELINE_COMMIT = "47bf490"
 MAX_UPLOAD_MB = 50
 REQUIRED_MODEL_FILES = ("config.json", "model.safetensors", "tokenizer.json",
                         "survey_config.json", "hybrid_combiner.joblib")
@@ -180,9 +180,10 @@ def classify(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Classification failed: {e}")
 
-    excluded_categories = {"survey", "non-paper"} | ({"magazine-overview"} if exclude_magazine_overviews else set())
+    # Only surveys are removed from the metrics; non-papers stay in both (as in the paper)
+    excluded_categories = {"survey"} | ({"magazine-overview"} if exclude_magazine_overviews else set())
     excluded = df["Category"].isin(excluded_categories)
-    df["Prediction"] = (~excluded).astype(int)  # 1 = kept, 0 = excluded
+    df["Prediction"] = (~excluded).astype(int)  # 0 = survey (excluded), 1 = kept
     kept_df, excluded_df = df[~excluded], df[excluded]
 
     counts = df["Category"].value_counts()
