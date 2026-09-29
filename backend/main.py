@@ -1,5 +1,5 @@
 """
-Survey Paper Classifier API
+Survey Excluder API
 ===================
 Classifies uploaded publication lists into survey / magazine-overview /
 non-paper / research, and recalculates h-index, i10-index and citations
@@ -73,11 +73,11 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Survey Paper Classifier API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Survey Excluder API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[f"http://{host}:{port}" for host in ("localhost", "127.0.0.1")
-                   for port in (8080, 8081, 5173, 3000)],
+    # Allow localhost, Vercel preview/production URLs, or custom domains
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,6 +93,8 @@ def read_csv(content: bytes) -> pd.DataFrame:
             continue
         except pd.errors.EmptyDataError:
             raise HTTPException(status_code=400, detail="The CSV file is empty.")
+        except pd.errors.ParserError as e:
+            raise HTTPException(status_code=400, detail=f"The CSV file is malformed: {e}")
     raise HTTPException(status_code=400, detail="Could not decode the CSV file (use UTF-8).")
 
 
@@ -229,5 +231,4 @@ def classify(
 
 
 if __name__ == "__main__":
-    # 127.0.0.1: only reachable from this computer; set HOST=0.0.0.0 to expose it on the network
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", 8000)))
+    uvicorn.run(app, host=os.environ.get("HOST", "0.0.0.0"), port=int(os.environ.get("PORT", 8000)))
